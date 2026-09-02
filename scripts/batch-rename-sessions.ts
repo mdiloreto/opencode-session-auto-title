@@ -8,8 +8,8 @@
  *
  * Environment variables:
  *   OPENCODE_URL        - Server URL (default: http://127.0.0.1:4096)
- *   OPENCODE_PROVIDER   - Provider ID (default: anthropic)
- *   OPENCODE_MODEL      - Model ID for title generation (default: claude-haiku-4-5)
+ *   OPENCODE_PROVIDER   - Provider ID (default: github-copilot)
+ *   OPENCODE_MODEL      - Model ID for title generation (default: claude-haiku-4.5)
  *   OPENCODE_DB         - Path to OpenCode SQLite DB (default: ~/.local/share/opencode/opencode.db)
  *   MAX_SESSIONS        - Limit the number of sessions to process (0 = all, default: 0)
  *   REQUEST_DELAY       - Delay in ms between requests (default: 1200)
@@ -25,10 +25,12 @@ import { homedir } from "node:os"
 
 const BASE_URL = process.env.OPENCODE_URL ?? "http://127.0.0.1:4096"
 const MODEL = {
-  providerID: process.env.OPENCODE_PROVIDER ?? "anthropic",
-  modelID: process.env.OPENCODE_MODEL ?? "claude-haiku-4-5",
+  providerID: process.env.OPENCODE_PROVIDER ?? "github-copilot",
+  modelID: process.env.OPENCODE_MODEL ?? "claude-haiku-4.5",
 }
 const REQUEST_DELAY_MS = Number(process.env.REQUEST_DELAY ?? 1200)
+const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL ?? 1000)
+const POLL_TIMEOUT_MS = Number(process.env.POLL_TIMEOUT ?? 30000)
 const MAX_SOURCE_CHARS = 6000
 const MAX_SESSIONS = Number(process.env.MAX_SESSIONS ?? 0)
 const DB_PATH = process.env.OPENCODE_DB ?? resolve(homedir(), ".local/share/opencode/opencode.db")
@@ -51,7 +53,9 @@ async function api<T = any>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     throw new Error(`${init?.method ?? "GET"} ${path} failed (${res.status}): ${await res.text()}`)
   }
-  const payload = await res.json()
+  const text = await res.text()
+  if (!text) return undefined as T
+  const payload = JSON.parse(text)
   return (payload?.data ?? payload) as T
 }
 
@@ -119,7 +123,8 @@ async function generateTitle(seed: string): Promise<string> {
   if (!workerID) throw new Error("Worker session id missing")
 
   try {
-    const resp = await api(`/session/${workerID}/message`, {
+    // Fire the message request (async — returns empty body)
+    await api(`/session/${workerID}/message`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -140,15 +145,47 @@ async function generateTitle(seed: string): Promise<string> {
       }),
     })
 
-    const parts: any[] = Array.isArray(resp?.parts) ? resp.parts : []
-    const rawText = parts
-      .filter((p) => p?.type === "text")
-      .map((p) => String(p?.text ?? ""))
-      .join("\n")
+    // Poll for the assistant response
+    const deadline = Date.now() + POLL_TIMEOUT_MS
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS))
+      const messages = await api(`/session/${workerID}/message`)
+      const msgList: any[] = Array.isArray(messages) ? messages : []
 
-    const title = sanitizeTitle(rawText)
-    if (!title) throw new Error("Model did not return a valid title")
-    return title
+      // Look for a completed assistant message
+      const assistantMsg = msgList.find(
+        (m) => m?.info?.role === "assistant" && m?.metadata?.assistant?.status === "completed"
+      )
+      if (assistantMsg) {
+        const parts: any[] = Array.isArray(assistantMsg?.parts) ? assistantMsg.parts : []
+        const rawText = parts
+          .filter((p) => p?.type === "text")
+          .map((p) => String(p?.text ?? ""))
+          .join("\n")
+
+        const title = sanitizeTitle(rawText)
+        if (!title) throw new Error("Model did not return a valid title")
+        return title
+      }
+
+      // Also check if any assistant message exists with text content (fallback)
+      const anyAssistant = msgList.find((m) => m?.info?.role === "assistant")
+      if (anyAssistant) {
+        const parts: any[] = Array.isArray(anyAssistant?.parts) ? anyAssistant.parts : []
+        const rawText = parts
+          .filter((p) => p?.type === "text")
+          .map((p) => String(p?.text ?? ""))
+          .join("\n")
+          .trim()
+
+        if (rawText) {
+          const title = sanitizeTitle(rawText)
+          if (title) return title
+        }
+      }
+    }
+
+    throw new Error(`Timed out waiting for title generation (${POLL_TIMEOUT_MS}ms)`)
   } finally {
     await fetch(`${BASE_URL}/session/${workerID}`, { method: "DELETE" }).catch(() => {})
   }
