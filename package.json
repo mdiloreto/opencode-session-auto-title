@@ -1,0 +1,12 @@
+{
+  "name": "opencode-session-auto-title",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "install:timer": "bash scripts/install-systemd.sh",
+    "test": "node --test tests/*.test.ts"
+  }
+}
