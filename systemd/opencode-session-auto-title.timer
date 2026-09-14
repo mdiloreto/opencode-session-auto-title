@@ -1,0 +1,12 @@
+[Unit]
+Description=Run OpenCode session auto-title twice daily
+
+[Timer]
+OnCalendar=*-*-* 08:00:00
+OnCalendar=*-*-* 20:00:00
+Persistent=true
+RandomizedDelaySec=15m
+Unit=opencode-session-auto-title.service
+
+[Install]
+WantedBy=timers.target
