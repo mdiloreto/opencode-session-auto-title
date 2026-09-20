@@ -10,7 +10,7 @@ const DB_PATH = process.env.OPENCODE_DB ?? resolve(homedir(), ".local/share/open
 const OPENCODE_BIN = process.env.OPENCODE_BIN ?? "opencode"
 const AGY_BIN = process.env.AGY_BIN ?? "agy"
 const AGY_MODEL = process.env.AUTOTITLE_AGY_MODEL ?? "gemini-3.8-flash-low"
-const TITLE_MODEL = process.env.AUTOTITLE_MODEL ?? "openai/gpt-5.3-codex-spark"
+const TITLE_MODEL = process.env.AUTOTITLE_MODEL ?? "openai/gpt-5.6-luna"
 const TIMEOUT_MS = numberFromEnv("AUTOTITLE_TIMEOUT_MS", 120_000)
 const REQUEST_DELAY_MS = numberFromEnv("REQUEST_DELAY", 1_200)
 const MIN_AGE_MINUTES = numberFromEnv("MIN_AGE_MINUTES", 30)
@@ -240,8 +240,8 @@ function titlePrompt(seed: string): string {
   ].join("\n")
 }
 
-async function generateWithAgy(prompt: string): Promise<string> {
-  const { stdout } = await execFileAsync(
+async function generateWithAgy(prompt: string, run = execFileAsync): Promise<string> {
+  const { stdout } = await run(
     AGY_BIN,
     [
       "--output-format", "text",
@@ -258,12 +258,12 @@ async function generateWithAgy(prompt: string): Promise<string> {
   return title
 }
 
-async function generateWithOpenCode(prompt: string): Promise<string> {
+async function generateWithOpenCode(prompt: string, run = execFileAsync): Promise<string> {
   const [provider, ...modelParts] = TITLE_MODEL.split("/")
   if (!provider || modelParts.length === 0) throw new Error("AUTOTITLE_MODEL must use provider/model format")
   let workerID: string | undefined
   try {
-    const { stdout } = await execFileAsync(
+    const { stdout } = await run(
       OPENCODE_BIN,
       [
         "--pure", "run",
@@ -317,16 +317,16 @@ export function parseOpenCodeOutput(stdout: string): { sessionID?: string; text:
   return { sessionID, text }
 }
 
-async function generateTitle(seed: string): Promise<string> {
+export async function generateTitle(seed: string, run = execFileAsync): Promise<string> {
   const prompt = titlePrompt(seed)
-  if (process.env.AUTOTITLE_USE_AGY === "1") {
+  if (process.env.AUTOTITLE_USE_AGY !== "0") {
     try {
-      return await generateWithAgy(prompt)
+      return await generateWithAgy(prompt, run)
     } catch (error: any) {
       console.warn(`Agy failed; using OpenCode (${processFailure(error)})`)
     }
   }
-  return generateWithOpenCode(prompt)
+  return generateWithOpenCode(prompt, run)
 }
 
 function processFailure(error: any): string {

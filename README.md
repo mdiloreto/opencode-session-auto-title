@@ -5,15 +5,28 @@ Generate concise titles for OpenCode sessions that still have the exact default
 
 The repository contains:
 
-- `plugins/auto-title.ts`: idle-session fallback plugin with optional Agy generation.
+- `plugins/auto-title.ts`: idle-session fallback plugin with Agy-first generation.
 - `scripts/batch-rename-sessions.ts`: safe historical backfill command.
-- `systemd/`: a user timer that runs the backfill at 08:00 and 20:00.
+- `systemd/`: a user timer that runs the backfill four times daily.
 
 ## Models
 
-The OpenCode path uses `openai/gpt-5.3-codex-spark` with low reasoning. Set
-`AUTOTITLE_USE_AGY=1` to try Agy with `gemini-3.8-flash-low` first. If Agy is
-unavailable or returns an invalid title, generation falls back to OpenCode.
+Agy uses `gemini-3.8-flash-low` by default. If Agy is unavailable or returns
+an invalid title, generation falls back to `openai/gpt-5.6-luna` through
+OpenCode with low reasoning. Set `AUTOTITLE_USE_AGY=0` to use OpenCode directly.
+
+## Per-Session Plugin
+
+Install both plugin files, then restart OpenCode:
+
+```bash
+install -Dm0644 plugins/auto-title.ts ~/.config/opencode/plugins/auto-title.ts
+install -Dm0644 lib/auto-title.ts ~/.config/opencode/lib/auto-title.ts
+```
+
+The plugin runs after a root session becomes idle and only replaces exact
+default titles. Its module intentionally exports only the plugin function;
+OpenCode rejects auto-discovered modules that expose non-function test helpers.
 
 ## Backfill
 
@@ -25,10 +38,10 @@ not already available and stops only the server it started.
 node scripts/batch-rename-sessions.ts --dry-run --limit 5
 
 # Generate titles without updating sessions.
-AUTOTITLE_USE_AGY=1 node scripts/batch-rename-sessions.ts --preview --limit 5
+node scripts/batch-rename-sessions.ts --preview --limit 5
 
 # Rename up to 20 sessions.
-AUTOTITLE_USE_AGY=1 node scripts/batch-rename-sessions.ts --limit 20
+node scripts/batch-rename-sessions.ts --limit 20
 ```
 
 Only unarchived root sessions at least 30 minutes old and matching the exact
@@ -51,8 +64,8 @@ Configuration:
 | `OPENCODE_URL` | `http://127.0.0.1:4096` |
 | `OPENCODE_DB` | `~/.local/share/opencode/opencode.db` |
 | `OPENCODE_BIN` | `opencode` |
-| `AUTOTITLE_MODEL` | `openai/gpt-5.3-codex-spark` |
-| `AUTOTITLE_USE_AGY` | unset; set to `1` to enable Agy |
+| `AUTOTITLE_MODEL` | `openai/gpt-5.6-luna` |
+| `AUTOTITLE_USE_AGY` | unset; set to `0` to disable Agy |
 | `AUTOTITLE_AGY_MODEL` | `gemini-3.8-flash-low` |
 | `AGY_BIN` | `agy` |
 | `MIN_AGE_MINUTES` | `30` |
@@ -69,8 +82,9 @@ npm run install:timer
 ```
 
 The service uses `flock` to prevent overlap, processes at most 20 sessions per
-run, enables Agy explicitly, and falls back to OpenCode Spark. The timer is
-persistent and adds up to 15 minutes of randomized delay.
+run, enables Agy explicitly, and falls back to OpenCode Luna. The timer runs at
+08:00, 12:00, 16:00, and 20:00, is persistent, and adds up to 15 minutes of
+randomized delay.
 
 ```bash
 systemctl --user status opencode-session-auto-title.timer

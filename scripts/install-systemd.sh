@@ -15,7 +15,7 @@ for executable in /usr/bin/node /usr/bin/sqlite3 /usr/bin/systemctl /usr/bin/flo
 done
 
 if [[ ! -x $HOME/.local/bin/agy ]]; then
-  echo "Agy is unavailable; scheduled runs will use OpenCode Spark." >&2
+  echo "Agy is unavailable; scheduled runs will use OpenCode Luna." >&2
 fi
 
 node_version=$(/usr/bin/node -p 'process.versions.node')

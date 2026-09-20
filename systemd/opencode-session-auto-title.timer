@@ -1,8 +1,10 @@
 [Unit]
-Description=Run OpenCode session auto-title twice daily
+Description=Run OpenCode session auto-title four times daily
 
 [Timer]
 OnCalendar=*-*-* 08:00:00
+OnCalendar=*-*-* 12:00:00
+OnCalendar=*-*-* 16:00:00
 OnCalendar=*-*-* 20:00:00
 Persistent=true
 RandomizedDelaySec=15m
