@@ -1,13 +1,28 @@
 import assert from "node:assert/strict"
-import { test } from "node:test"
+import { afterEach, test } from "node:test"
 
 import {
   extractSeed,
+  generateTitle,
   isDefaultTitle,
   parseArgs,
   parseOpenCodeOutput,
   sanitizeTitle,
 } from "../scripts/batch-rename-sessions.ts"
+
+const originalAgySetting = process.env.AUTOTITLE_USE_AGY
+
+afterEach(() => {
+  if (originalAgySetting === undefined) delete process.env.AUTOTITLE_USE_AGY
+  else process.env.AUTOTITLE_USE_AGY = originalAgySetting
+})
+
+function openCodeOutput(title: string): string {
+  return `${JSON.stringify({
+    type: "text",
+    part: { type: "text", text: title },
+  })}\n`
+}
 
 test("recognizes only exact OpenCode default titles", () => {
   assert.equal(isDefaultTitle("New session - 2026-09-12T12:34:56.789Z"), true)
@@ -57,4 +72,54 @@ test("parses OpenCode NDJSON text events", () => {
     })}\n`),
     { sessionID: "ses_worker", text: "Generated title" },
   )
+})
+
+test("uses Agy first by default", async () => {
+  delete process.env.AUTOTITLE_USE_AGY
+  const calls: string[] = []
+
+  const title = await generateTitle(
+    "Scheduled backfill",
+    (async (file) => {
+      calls.push(file)
+      return { stdout: "Scheduled backfill\n", stderr: "" }
+    }) as any,
+  )
+
+  assert.equal(title, "Scheduled backfill")
+  assert.deepEqual(calls, ["agy"])
+})
+
+test("falls back to OpenCode Luna after invalid Agy output", async () => {
+  delete process.env.AUTOTITLE_USE_AGY
+  const calls: Array<{ file: string; args: string[] }> = []
+
+  const title = await generateTitle(
+    "Fallback title",
+    (async (file, args) => {
+      calls.push({ file, args })
+      if (file === "agy") return { stdout: " \n", stderr: "" }
+      return { stdout: openCodeOutput("Fallback title"), stderr: "" }
+    }) as any,
+  )
+
+  assert.equal(title, "Fallback title")
+  assert.deepEqual(calls.map(({ file }) => file), ["agy", "opencode"])
+  assert.ok(calls[1].args.includes("openai/gpt-5.6-luna"))
+})
+
+test("bypasses Agy when disabled", async () => {
+  process.env.AUTOTITLE_USE_AGY = "0"
+  const calls: string[] = []
+
+  const title = await generateTitle(
+    "Direct OpenCode title",
+    (async (file) => {
+      calls.push(file)
+      return { stdout: openCodeOutput("Direct OpenCode title"), stderr: "" }
+    }) as any,
+  )
+
+  assert.equal(title, "Direct OpenCode title")
+  assert.deepEqual(calls, ["opencode"])
 })

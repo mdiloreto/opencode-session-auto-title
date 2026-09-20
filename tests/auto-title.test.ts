@@ -1,9 +1,8 @@
 import assert from "node:assert/strict"
 import { afterEach, test } from "node:test"
 
-import { AutoTitleTest } from "../plugins/auto-title.ts"
-
-const { generateTitle } = AutoTitleTest
+import { generateTitle } from "../lib/auto-title.ts"
+import * as autoTitlePlugin from "../plugins/auto-title.ts"
 
 const originalEnv = {
   AUTOTITLE_USE_AGY: process.env.AUTOTITLE_USE_AGY,
@@ -36,8 +35,13 @@ function openCodeOutput(title: string): string {
   })}\n`
 }
 
-test("uses OpenCode Spark by default", async () => {
-  delete process.env.AUTOTITLE_USE_AGY
+test("exports only OpenCode plugin functions", () => {
+  assert.deepEqual(Object.keys(autoTitlePlugin), ["AutoTitle"])
+  assert.equal(typeof autoTitlePlugin.AutoTitle, "function")
+})
+
+test("uses OpenCode Luna when Agy is disabled", async () => {
+  process.env.AUTOTITLE_USE_AGY = "0"
   process.env.OPENCODE_BIN = "/test/opencode"
   const calls: Array<{ file: string; args: string[] }> = []
 
@@ -52,11 +56,29 @@ test("uses OpenCode Spark by default", async () => {
 
   assert.equal(title, "Rename old sessions")
   assert.equal(calls[0].file, "/test/opencode")
-  assert.ok(calls[0].args.includes("openai/gpt-5.3-codex-spark"))
+  assert.ok(calls[0].args.includes("openai/gpt-5.6-luna"))
 })
 
-test("uses Agy when enabled and falls back when it fails", async () => {
-  process.env.AUTOTITLE_USE_AGY = "1"
+test("uses Agy by default", async () => {
+  delete process.env.AUTOTITLE_USE_AGY
+  const calls: Array<{ file: string; args: string[] }> = []
+
+  const title = await generateTitle(
+    client().value,
+    "Automatic title generation",
+    (async (file, args) => {
+      calls.push({ file, args })
+      return { stdout: "Automatic title generation\n", stderr: "" }
+    }) as any,
+  )
+
+  assert.equal(title, "Automatic title generation")
+  assert.equal(calls[0].file, "agy")
+  assert.ok(calls[0].args.includes("gemini-3.8-flash-low"))
+})
+
+test("falls back to OpenCode when Agy fails", async () => {
+  delete process.env.AUTOTITLE_USE_AGY
   process.env.OPENCODE_BIN = "/test/opencode"
   const calls: string[] = []
   const { value, logs } = client()
